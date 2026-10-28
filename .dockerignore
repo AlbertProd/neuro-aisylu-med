@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!package.json
+!src/
+!src/**
+!content/
+!content/**
+!scripts/
+!scripts/backup.js

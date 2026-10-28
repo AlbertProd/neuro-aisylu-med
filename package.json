@@ -1,0 +1,23 @@
+{
+  "name": "neuro-aisylu-med",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "НейроАйсылу — чат-бот проекта MЁD из Уфы",
+  "engines": {
+    "node": ">=20.20"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --test",
+    "check:secrets": "node --env-file-if-exists=.env scripts/check-secrets.js",
+    "check": "node --env-file-if-exists=.env scripts/check.js",
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.4.1",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0"
+  }
+}

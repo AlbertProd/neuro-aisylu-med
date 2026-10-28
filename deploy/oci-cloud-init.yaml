@@ -1,0 +1,7 @@
+#cloud-config
+# Ubuntu 24.04: prepare Docker without starting a second bot or storing secrets.
+package_update: true
+packages:
+  - docker.io
+runcmd:
+  - [systemctl, enable, --now, docker]
