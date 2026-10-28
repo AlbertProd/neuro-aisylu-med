@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../',import.meta.url));
 const directories = ['src','content','scripts','test','deploy'];
-const sources = ['Dockerfile','.dockerignore','.env.example','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','bothost.json',...directories,'README.md','DEPLOY.md'];
+const sources = ['Dockerfile','.dockerignore','.env.example','LICENSE','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','bothost.json',...directories,'README.md','DEPLOY.md'];
 const secrets = [process.env.TELEGRAM_BOT_TOKEN,process.env.POLZA_API_KEY].filter(Boolean);
 function verify(relative) {
   const path = join(root,relative);

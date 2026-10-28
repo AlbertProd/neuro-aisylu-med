@@ -10,7 +10,7 @@ ENV NODE_ENV=production \
     FFPROBE_PATH=/usr/bin/ffprobe \
     DATABASE_PATH=/app/data/aisylu.sqlite
 
-COPY package.json ./
+COPY package.json LICENSE ./
 COPY src ./src
 COPY content ./content
 COPY scripts/backup.js ./scripts/backup.js
