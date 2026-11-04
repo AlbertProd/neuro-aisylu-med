@@ -1,4 +1,4 @@
-import { mkdirSync, openSync, readFileSync, closeSync, unlinkSync, writeSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { getConfig, safeError } from './config.js';
@@ -7,6 +7,7 @@ import { Telegram } from './telegram.js';
 import { AI } from './ai.js';
 import { Router, COMMANDS } from './router.js';
 import { configureProfile } from './profile.js';
+import { acquireLock } from './lock.js';
 
 const config = getConfig();
 const logger = {
@@ -15,18 +16,7 @@ const logger = {
 };
 mkdirSync(dirname(config.databasePath),{ recursive:true });
 const lockPath = join(dirname(config.databasePath),'bot.lock');
-let lock;
-try { lock = openSync(lockPath,'wx'); }
-catch (error) {
-  if (error.code !== 'EEXIST') throw error;
-  const oldPid = Number(readFileSync(lockPath,'utf8'));
-  let live = false;
-  try { process.kill(oldPid,0); live = true; } catch (probe) { if (probe.code !== 'ESRCH') live = true; }
-  if (live) throw new Error('бот уже запущен');
-  unlinkSync(lockPath);
-  lock = openSync(lockPath,'wx');
-}
-writeSync(lock,String(process.pid));
+const releaseLock = acquireLock(lockPath);
 const store = new Store(config.databasePath);
 const telegram = new Telegram(config.telegramToken);
 const controller = new AbortController();
@@ -63,8 +53,6 @@ try {
   }
 } catch (error) { logger.error(error); process.exitCode = 1; }
 finally {
-  store.close();
-  closeSync(lock);
-  unlinkSync(lockPath);
-  logger.info('бот остановлен');
+  try { store.close(); }
+  finally { releaseLock();logger.info('бот остановлен'); }
 }
