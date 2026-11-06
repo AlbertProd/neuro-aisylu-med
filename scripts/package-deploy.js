@@ -6,7 +6,12 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../',import.meta.url));
 const directories = ['src','content','scripts','test','deploy'];
 const sources = ['Dockerfile','.dockerignore','.env.example','LICENSE','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','bothost.json',...directories,'README.md','DEPLOY.md'];
-const secrets = [process.env.TELEGRAM_BOT_TOKEN,process.env.POLZA_API_KEY].filter(Boolean);
+const secrets = [process.env.TELEGRAM_BOT_TOKEN,process.env.POLZA_API_KEY,process.env.GEMINI_API_KEY,process.env.TAVILY_API_KEY,process.env.VERTEX_SERVICE_ACCOUNT_BASE64].filter(Boolean);
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  const raw=readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8');
+  const credentials=JSON.parse(raw);
+  secrets.push(Buffer.from(raw).toString('base64'),credentials.private_key);
+}
 function verify(relative) {
   const path = join(root,relative);
   const entries = readdirSync(path,{ withFileTypes:true });
@@ -19,7 +24,7 @@ function verify(relative) {
 }
 function verifyFile(relative) {
   const body = readFileSync(join(root,relative));
-  if (secrets.some(secret => body.includes(Buffer.from(secret)))) throw new Error(`в коде найден ключ: ${relative}`);
+  if (secrets.some(secret => body.includes(Buffer.from(secret))) || /-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----|"private_key"\s*:\s*"-----BEGIN/u.test(body.toString('utf8'))) throw new Error(`в коде найден ключ: ${relative}`);
 }
 for (const source of sources) {
   if (directories.includes(source)) verify(source);

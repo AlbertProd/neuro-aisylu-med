@@ -18,5 +18,6 @@ twst11/
 *.tar.gz
 *.pem
 *.key
+*service-account*.json
 .DS_Store
 Thumbs.db

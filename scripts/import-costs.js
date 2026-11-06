@@ -6,6 +6,7 @@ import { localDay } from '../src/style.js';
 const config = getConfig();
 const store = new Store(config.databasePath);
 try {
+  if (config.provider!=='polza') throw new Error('импорт фактических списаний доступен только для AI_PROVIDER=polza');
   const day = localDay();
   const dateFrom = new Date(`${day}T00:00:00+05:00`).toISOString();
   let pages = 1;

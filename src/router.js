@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { formatReply, localDay } from './style.js';
 import { mediaFile, prepareMedia, MediaError } from './media.js';
 import { nextDelivery } from './humor.js';
+import { SearchError } from './search.js';
 
 export const COMMANDS = [
   ['menu','меню айсылу'], ['summary','что было в чате'], ['search','поиск в интернете'],
@@ -117,7 +118,8 @@ export class Router {
     }
     if (command === 'budget') {
       const spend = this.store.spending();
-      return this.say(message, `сегодня ${spend.actual.toFixed(2)} ₽ резерв ${spend.held.toFixed(2)} ₽ бюджет ${this.config.dailyBudgetRub} ₽ поиск и медиа ${spend.expensive} из ${this.config.expensivePerDay} каждому ${this.config.expensivePerUserDay} в сутки сброс в полночь по уфе`);
+      const search=this.config.searchProvider==='tavily'?` tavily ${this.store.searchCredits()}/${this.config.searchMonthlyCredits} кредитов в месяц`:'';
+      return this.say(message, `сегодня списано ${spend.actual.toFixed(2)} ₽ оценка google ${spend.estimated.toFixed(2)} ₽ резерв ${spend.held.toFixed(2)} ₽ бюджет ${this.config.dailyBudgetRub} ₽ поиск и медиа ${spend.expensive}/${this.config.expensivePerDay} каждому ${this.config.expensivePerUserDay} в сутки${search} сброс расходов по уфе`);
     }
     if (command === 'forget') {
       this.store.forget(chatId);
@@ -207,9 +209,10 @@ export class Router {
       this.store.settleSpending(reservation.id,result.usage,result.generationId);
       settled = true;
       const cost = Number(result.usage?.cost_rub ?? result.usage?.cost);
-      this.logger.info(`ai mode=${mode} tokens=${result.usage?.total_tokens ?? '?'} cost_rub=${Number.isFinite(cost) ? cost : '?'} reasoning=${result.usage?.completion_tokens_details?.reasoning_tokens ?? '?'} cached=${result.usage?.prompt_tokens_details?.cached_tokens ?? '?'} generation=${result.generationId || '?'}`);
+      this.logger.info(`ai provider=${this.config.provider || 'polza'} mode=${mode} tokens=${result.usage?.total_tokens ?? '?'} cost_rub=${Number.isFinite(cost) ? cost : '?'} estimated=${!!result.usage?.cost_estimated} reasoning=${result.usage?.completion_tokens_details?.reasoning_tokens ?? '?'} cached=${result.usage?.prompt_tokens_details?.cached_tokens ?? '?'} generation=${result.generationId || '?'}`);
       if (media.length) this.store.annotate(message.chat.id,mediaMessage.message_id,`[краткий разбор медиа моделью] ${result.text}`);
-      const markup = result.sources?.length ? { inline_keyboard:[result.sources.map((s,i) => ({ text:`источник ${i+1}`,url:s.url }))] } : undefined;
+      const buttons=result.sources?.map((s,i)=>({text:`источник ${i+1}`,url:s.url}));
+      const markup = buttons?.length ? { inline_keyboard:[buttons.slice(0,3),...(buttons.length>3?[buttons.slice(3,5)]:[])] } : undefined;
       await this.say(message,result.text,markup);
     } catch (error) {
       if (!settled) {
@@ -217,7 +220,7 @@ export class Router {
         else this.store.settleSpending(reservation.id,error.usage,error.generationId);
       }
       this.logger.error(error);
-      if (!quiet) await this.say(message,error instanceof MediaError ? error.message : 'связь с мозгом отвалилась попробуй чуть позже');
+      if (!quiet) await this.say(message,error instanceof MediaError || error instanceof SearchError ? error.message : 'связь с мозгом отвалилась попробуй чуть позже');
     } finally { clearInterval(timer); }
   }
 

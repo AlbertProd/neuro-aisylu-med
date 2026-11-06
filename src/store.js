@@ -47,12 +47,45 @@ export class Store {
         tokens INTEGER, reasoning_tokens INTEGER, cached_tokens INTEGER
       );
       CREATE INDEX IF NOT EXISTS spending_day ON spending(day);
+      CREATE TABLE IF NOT EXISTS search_credits (
+        id TEXT PRIMARY KEY, month TEXT NOT NULL, credits INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS search_credits_month ON search_credits(month);
+      CREATE TABLE IF NOT EXISTS search_cache (
+        key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL
+      );
     `);
   }
 
   close() { this.db.close(); }
   get(key) { return this.db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value; }
   set(key, value) { this.db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key, String(value)); }
+  searchCredits(month = new Date().toISOString().slice(0,7)) {
+    return this.db.prepare('SELECT COALESCE(sum(credits),0) AS n FROM search_credits WHERE month=?').get(month).n;
+  }
+  reserveSearchCredits(limit,credits=2,now=Date.now()) {
+    return this.transaction(()=>{
+      // Tavily resets monthly; UTC avoids resetting early relative to the provider.
+      const month = new Date(now).toISOString().slice(0,7);
+      if (this.searchCredits(month)+credits>limit) return null;
+      const id = randomUUID();
+      this.db.prepare('INSERT INTO search_credits VALUES (?,?,?)').run(id,month,credits);
+      return id;
+    });
+  }
+  releaseSearchCredits(id) { this.db.prepare('DELETE FROM search_credits WHERE id=?').run(id); }
+  cachedSearch(key,now=Date.now()) {
+    const row = this.db.prepare('SELECT value FROM search_cache WHERE key=? AND expires>?').get(key,now);
+    if (!row) return null;
+    try { return JSON.parse(row.value); } catch { return null; }
+  }
+  cacheSearch(key,value,expires,now=Date.now()) {
+    this.transaction(()=>{
+      this.db.prepare('DELETE FROM search_cache WHERE expires<=?').run(now);
+      this.db.prepare('INSERT OR REPLACE INTO search_cache VALUES (?,?,?)').run(key,expires,JSON.stringify(value));
+      this.db.exec('DELETE FROM search_cache WHERE key NOT IN (SELECT key FROM search_cache ORDER BY expires DESC LIMIT 100)');
+    });
+  }
   transaction(fn) {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); this.db.exec('COMMIT'); return result; }
@@ -192,10 +225,11 @@ export class Store {
 
   spending(day = localDay()) {
     const row = this.db.prepare(`SELECT COALESCE(sum(CASE WHEN state='reported' THEN actual ELSE 0 END),0) AS actual,
+      COALESCE(sum(CASE WHEN state='estimated' THEN actual ELSE 0 END),0) AS estimated,
       COALESCE(sum(CASE WHEN state IN ('reserved','uncertain') THEN reserved ELSE 0 END),0) AS held,
       sum(CASE WHEN kind IN ('search','media') AND state!='cancelled' THEN 1 ELSE 0 END) AS expensive,
       count(*) AS requests FROM spending WHERE day=?`).get(day);
-    return { ...row,expensive:row.expensive || 0,total:row.actual+row.held };
+    return { ...row,expensive:row.expensive || 0,total:row.actual+row.estimated+row.held };
   }
 
   reserveSpending(chatId,userId,kind,config,now = Date.now()) {
@@ -220,7 +254,7 @@ export class Store {
     const actual = value == null || value === '' ? NaN : Number(value);
     const known = Number.isFinite(actual) && actual >= 0;
     this.db.prepare('UPDATE spending SET actual=?,state=?,generation_id=?,tokens=?,reasoning_tokens=?,cached_tokens=? WHERE id=?').run(
-      known ? actual : null,known ? 'reported' : 'uncertain',generationId || null,usage?.total_tokens ?? null,
+      known ? actual : null,known ? (usage?.cost_estimated?'estimated':'reported') : 'uncertain',generationId || null,usage?.total_tokens ?? null,
       usage?.completion_tokens_details?.reasoning_tokens ?? null,usage?.prompt_tokens_details?.cached_tokens ?? null,id,
     );
   }

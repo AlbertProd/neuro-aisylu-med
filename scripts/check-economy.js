@@ -6,7 +6,7 @@ import { MOODS } from '../src/moods.js';
 
 const config = getConfig();
 const store = new Store(config.databasePath);
-const ai = new AI(config);
+const ai = new AI(config,fetch,store);
 try {
   for (const [mode,query] of [
     ['chat','представься одной фразой и объясни почему у тебя phd'],
@@ -20,7 +20,7 @@ try {
       console.log(JSON.stringify({ mode,text:result.text,sources:result.sources.length,cost_rub:result.usage?.cost_rub ?? result.usage?.cost,tokens:result.usage?.total_tokens,reasoning:result.usage?.completion_tokens_details?.reasoning_tokens,cached:result.usage?.prompt_tokens_details?.cached_tokens,generation:result.generationId }));
       if (mode === 'search' && !result.sources.length) throw new Error('поиск не вернул источники');
     } catch (error) {
-      if (store.db.prepare('SELECT state FROM spending WHERE id=?').get(reservation.id).state !== 'reported') {
+      if (!['reported','estimated'].includes(store.db.prepare('SELECT state FROM spending WHERE id=?').get(reservation.id).state)) {
         if (error.definitelyUnbilled) store.cancelSpending(reservation.id);
         else store.settleSpending(reservation.id,error.usage,error.generationId);
       }

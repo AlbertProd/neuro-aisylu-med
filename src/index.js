@@ -29,8 +29,8 @@ try {
   const webhook = await telegram.call('getWebhookInfo');
   if (webhook.url) throw new Error('у бота уже настроен webhook отключи его перед запуском polling');
   await configureProfile(telegram,store,COMMANDS,logger,{ bot });
-  const router = new Router({ config,store,telegram,ai:new AI(config),bot,logger });
-  logger.info(`НейроАйсылу запущена @${bot.username} model=${config.model} privacy=${!bot.can_read_all_group_messages}`);
+  const router = new Router({ config,store,telegram,ai:new AI(config,fetch,store),bot,logger });
+  logger.info(`НейроАйсылу запущена @${bot.username} provider=${config.provider} model=${config.model} privacy=${!bot.can_read_all_group_messages}`);
   let failures = 0;
   while (!controller.signal.aborted) {
     try {

@@ -3,6 +3,9 @@ import { randomInt } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { formatReply, localDay } from './style.js';
 import { variationGuide, selectReply } from './humor.js';
+import { buildGeminiRequest,parseGeminiResponse } from './gemini.js';
+import { VertexAuth } from './vertex.js';
+import { WebSearch,addSearchContext } from './search.js';
 
 const PERSONA = readFileSync(new URL('../content/persona.md', import.meta.url), 'utf8');
 const seriousQuestion = query => /хочу (?:умереть|убить себя|покончить с собой)|не хочу жить|суицид|самоубий|самоповреж|убью себя|мне (?:очень |серь[её]зно )?плохо|паническая атака|лекарств|лечение|боль в груди|i (?:want to die|will kill myself)/iu.test(String(query || ''));
@@ -66,18 +69,31 @@ export function sourcesFrom(message) {
 }
 
 export class AI {
-  constructor(config, fetchImpl = fetch) { this.config = config; this.fetch = fetchImpl; }
+  constructor(config, fetchImpl = fetch,store) {
+    this.config = config;this.fetch = fetchImpl;
+    if (config.provider==='vertex') this.vertex=new VertexAuth(config,fetchImpl);
+    if (config.searchProvider==='tavily' || config.provider==='vertex') this.search=new WebSearch(config,store,fetchImpl);
+  }
   async reply(input) {
     const wordLimit = replyWordLimit(input);
+    const native = ['gemini','vertex'].includes(this.config.provider);
+    const request = buildRequest(this.config,{...input,wordLimit});
+    const retrieved=input.mode==='search' && this.search ? await this.search.search(input.query) : null;
+    if (retrieved) addSearchContext(request,retrieved);
+    const nativeInput = retrieved?{...input,mode:'external-search'}:input;
+    // Vertex always uses external search; built-in paid grounding is never enabled.
+    const url=this.vertex?this.vertex.endpoint:native?`${this.config.baseUrl}/models/${encodeURIComponent(this.config.model)}:generateContent`:`${this.config.baseUrl}/chat/completions`;
+    const headers=this.vertex?{Authorization:`Bearer ${await this.vertex.token()}`} : native?{'x-goog-api-key':this.config.geminiKey}:{Authorization:`Bearer ${this.config.polzaKey}`};
     const options = {
       method: 'POST',
-      headers: { Authorization: `Bearer ${this.config.polzaKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildRequest(this.config, { ...input,wordLimit })),
+      headers:{...headers,'Content-Type':'application/json'},
+      body: JSON.stringify(native?buildGeminiRequest(request,nativeInput):request),
       signal: AbortSignal.timeout(this.config.aiTimeoutMs),
+      redirect:'error',
     };
     let response;
     for (let attempt = 0;attempt < 2;attempt++) {
-      try { response = await this.fetch(`${this.config.baseUrl}/chat/completions`,options);break; }
+      try { response = await this.fetch(url,options);break; }
       catch (error) {
         // These failures occur before establishing a connection, hence before a paid request.
         const neverConnected = ['UND_ERR_CONNECT_TIMEOUT','ENOTFOUND','EAI_AGAIN'].includes(error.cause?.code);
@@ -86,23 +102,30 @@ export class AI {
         throw error;
       }
     }
-    if (!response.ok) throw new Error(`polza http ${response.status}`);
-    const data = await response.json();
-    const message = data.choices?.[0]?.message;
-    if (!message?.content) {
-      const error = new Error('polza вернула пустой ответ');
-      error.usage = data.usage;
-      error.generationId = data.id;
+    if (!response.ok) {
+      const error = new Error(`${this.config.provider || 'polza'} http ${response.status}${native && response.status===402?' prepay balance unavailable':''}`);
+      if (native && [400,401,402,403,404,429,500].includes(response.status)) error.definitelyUnbilled = true;
       throw error;
     }
-    const sources = sourcesFrom(message);
-    if (input.mode === 'search' && !sources.length) return { text: 'поиск не вернул проверяемых источников сейчас не буду выдумывать попробуй уточнить запрос', sources: [], usage: data.usage,generationId:data.id };
+    const data = await response.json();
+    const parsed = native?parseGeminiResponse(data,this.config,nativeInput):null;
+    const usage = native?parsed.usage:data.usage;
+    const generationId = native?parsed.generationId:data.id;
+    const message = native?{content:parsed.content}:data.choices?.[0]?.message;
+    if (!message?.content) {
+      const error = new Error(`${native?'gemini':'polza'} вернула пустой ответ`);
+      error.usage = usage;
+      error.generationId = generationId;
+      throw error;
+    }
+    const sources = retrieved?retrieved.results.map(({title,url})=>({title,url})):native?parsed.sources:sourcesFrom(message);
+    if (input.mode === 'search' && !sources.length) return { text: 'поиск не вернул проверяемых источников сейчас не буду выдумывать попробуй уточнить запрос', sources: [], usage,generationId };
     const content = Array.isArray(message.content) ? message.content.map(p => p.text || '').join(' ') : message.content;
     try {
-      return { text: usesCandidates(input) ? selectReply(content,input,wordLimit) : formatReply(content,wordLimit), sources, usage: data.usage,generationId:data.id };
+      return { text: usesCandidates(input) ? selectReply(content,input,wordLimit) : formatReply(content,wordLimit), sources, usage,generationId };
     } catch (error) {
-      error.usage = data.usage;
-      error.generationId = data.id;
+      error.usage = usage;
+      error.generationId = generationId;
       throw error;
     }
   }

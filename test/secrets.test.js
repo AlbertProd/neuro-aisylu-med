@@ -15,7 +15,7 @@ function fixture(t) {
   copyFileSync(new URL('../scripts/check-secrets.js',import.meta.url),join(directory,'scripts','check-secrets.mjs'));
   const git = (...args)=>execFileSync('git',args,{cwd:directory,windowsHide:true,stdio:'pipe'});
   git('init','-q','-b','main');
-  const check = ()=>spawnSync(process.execPath,['scripts/check-secrets.mjs'],{cwd:directory,windowsHide:true,encoding:'utf8',env:{...process.env,TELEGRAM_BOT_TOKEN:'',POLZA_API_KEY:''}});
+  const check = ()=>spawnSync(process.execPath,['scripts/check-secrets.mjs'],{cwd:directory,windowsHide:true,encoding:'utf8',env:{...process.env,TELEGRAM_BOT_TOKEN:'',POLZA_API_KEY:'',GEMINI_API_KEY:''}});
   return {directory,git,check};
 }
 
@@ -47,4 +47,26 @@ test('publication scan accepts empty env examples and rejects tracked local data
   writeFileSync(join(f.directory,'data','backup.sqlite'),'synthetic private data');
   f.git('add','--force','data/backup.sqlite');
   assert.equal(f.check().status,1);
+});
+
+test('publication scan detects a Google API key and never prints its value',t=>{
+  const f = fixture(t);
+  const fake = 'AIza'+'x'.repeat(35);
+  writeFileSync(join(f.directory,'source.js'),fake);
+  f.git('add','source.js');
+  const result = f.check();
+  assert.equal(result.status,1);
+  assert.ok(!result.stderr.includes(fake));
+});
+
+test('publication scan blocks Tavily keys and service account JSON without leaking values',t=>{
+  const f=fixture(t);
+  const secret='tvly-'+'synthetic'.repeat(8);
+  for (const body of [secret,JSON.stringify({type:'service_account',private_key:'synthetic'})]) {
+    writeFileSync(join(f.directory,'source.json'),body);
+    f.git('add','source.json');
+    const result=f.check();
+    assert.equal(result.status,1);
+    assert.ok(!result.stderr.includes(secret));
+  }
 });
